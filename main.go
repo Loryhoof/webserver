@@ -4,75 +4,112 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 )
 
-var world World = World{}
-
-func createPlayer(name string) Player {
-	player := Player{name, 100, Vector3{0, 10, 0}, Quaternion{0, 0, 0, 1}}
-
-	return player
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // allow all reqs
+	},
 }
 
-func addPlayer(w http.ResponseWriter, req *http.Request) {
-	type AddPlayerRequest struct {
-		Name string `json:"name"`
-		Position Vector3 `json:"position"`
-	}
+type Client struct {
+	ID         string
+	Connection *websocket.Conn
+}
 
-	var u AddPlayerRequest
+var clients = make(map[string]Client)
 
-	err := json.NewDecoder(req.Body).Decode(&u)
+type Message struct {
+	ID      string `json:"id"`
+	Message string `json:"message"`
+}
+
+var messages []Message
+
+func wsHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
 
 	if err != nil {
 		fmt.Println(err)
-		w.WriteHeader(500)
+		return
 	}
 
-	newPlayer := createPlayer(u.Name)
-	world.addPlayer(newPlayer)
+	id := uuid.NewString()
 
-	w.Header().Set("Content-Type", "application-json")
+	client := Client{ID: id, Connection: conn}
+	clients[id] = client
+	fmt.Printf("Client connected: %v", client.ID)
 
-	type ResponseObject struct {
-		Name string `json:"name"`
-		Health float32 `json:"health"`
-		Position Vector3 `json:"position"`
-		Quaternion Quaternion `json:"quaternion"`
+	conn.SetCloseHandler(func(code int, text string) error {
+		fmt.Println("\nClient sent close frame:", id, "Code:", code, "Text:", text)
+		delete(clients, id)
+
+		return nil
+	})
+
+	conn.WriteJSON(messages)
+
+	// conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	// conn.SetPongHandler(func(string) error {
+	// 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	// 	return nil
+	// })
+
+	defer conn.Close()
+
+	for {
+		_, b, err := conn.ReadMessage()
+
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		type IncomingMessage struct {
+			Event   string `json:"event"`
+			Message string `json:"message"`
+		}
+
+		var e IncomingMessage
+
+		json.Unmarshal(b, &e)
+
+		messages = append(messages, Message{ID: id, Message: e.Message})
+
+		type OutgoingMessage struct {
+			Type string `json:"type"`
+			ID      string `json:"id"`
+			Message string `json:"message"`
+		}
+
+		fmt.Println(string(b))
+		v := OutgoingMessage{Type: "message", ID: id, Message: e.Message}
+
+		//conn.WriteJSON(v)
+
+		// broadcast? maybe? 
+		for _, client := range clients {
+			err := client.Connection.WriteJSON(v)
+
+			if(err != nil) {
+				fmt.Println("write error, removing client:", client.ID, err)
+				client.Connection.Close()
+				delete(clients, client.ID)
+			}
+			
+		}
 	}
-
-	response := ResponseObject(newPlayer)
-
-	fmt.Println(response)
-	json.NewEncoder(w).Encode(response)
 }
 
 func main() {
 
-	ticker := time.NewTicker(time.Second / HZ)
-	//i := 0
-	defer ticker.Stop()
+	fmt.Println("Server running on port 8080")
 
-	
-
-	var player Player = createPlayer("Kevin")
-	world.addPlayer(player)
-
-	// for range ticker.C {
-	// 	i++
-
-	// 	world.update(float32(HZ) / 1000)
-
-	// }
-
-	// http.HandleFunc("/calculate", getCalc)
-
-	http.HandleFunc("/addPlayer", addPlayer)
-
-	err := http.ListenAndServe(":3333", nil)
-
-	if err != nil {
-		fmt.Println(err)
-	}
+	http.HandleFunc("/ws", wsHandler)
+	http.ListenAndServe(`:8080`, nil)
 }
