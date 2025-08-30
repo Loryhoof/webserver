@@ -25,9 +25,17 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type SocketEnvelope struct {
+	Event string      `json:"event"`
+	Data  interface{} `json:"data"`
+}
+
 type Client struct {
-	ID         string
-	Connection *websocket.Conn
+	ID         string `json:"id"`
+	Nickname   string `json:"nickname"`
+	Color      string `json:"color"`
+	Connection *websocket.Conn `json:"-"`
+
 }
 
 type ErrorResponse struct {
@@ -44,23 +52,75 @@ type TokenResponse struct {
 }
 
 type RefreshToken struct {
-	UserID int `json:"userID"`
+	UserID int    `json:"userID"`
 	Token  string `json:"token"`
-	Expiry int64 `json:"expiry"`
+	Expiry int64  `json:"expiry"`
 }
 
-var clients = make(map[string]Client)
+var clients = make(map[string]*Client)
 
 type Message struct {
 	ID      string `json:"id"`
-	Message string `json:"message"`
+	Content string `json:"content"`
+	UserID  string `json:"userId"`
 }
 
-var messages []Message
+var messages []Message = []Message{}
 
 var jwtSecret = []byte("1e2e894f1b997c8a92e577a7e9f6a30e805cd53b")
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+
+	tkn := r.URL.Query().Get("token")
+
+	if tkn == "" {
+		fmt.Println("no token")
+		return
+	}
+
+	err := verifyJWT(tkn)
+
+	if err != nil {
+		fmt.Printf("Token invalid for ws handshake")
+		return
+	}
+
+	db, err := sql.Open("sqlite3", "chat.db")
+
+	if err != nil {
+		panic(err)
+	}
+
+	email, err := parseJWT(tkn)
+
+	if err != nil {
+		panic(err)
+	}
+	row := db.QueryRow(`SELECT id, nickname, color FROM users WHERE email = ?`, email)
+
+	var userId string
+	var nickname string
+	var color string
+
+	err = row.Scan(&userId, &nickname, &color)
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(nickname, color)
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 
 	if err != nil {
@@ -68,20 +128,30 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := uuid.NewString()
-
-	client := Client{ID: id, Connection: conn}
-	clients[id] = client
+	client := Client{ID: userId, Connection: conn, Nickname: nickname, Color: color}
+	clients[userId] = &client
 	fmt.Printf("Client connected: %v", client.ID)
 
 	conn.SetCloseHandler(func(code int, text string) error {
-		fmt.Println("\nClient sent close frame:", id, "Code:", code, "Text:", text)
-		delete(clients, id)
+		fmt.Println("\nClient sent close frame:", userId, "Code:", code, "Text:", text)
+		delete(clients, userId)
 
 		return nil
 	})
 
-	conn.WriteJSON(messages)
+	type HistoryEvent struct {
+		Users []*Client `json:"users"`
+		Messages []Message `json:"messages"`
+	}
+	
+	clientSlice := make([]*Client, 0, len(clients))
+	for _, c := range clients {
+		clientSlice = append(clientSlice, c)
+	}
+
+	h := SocketEnvelope{Event: "history", Data: HistoryEvent{Messages: messages, Users: clientSlice}}
+
+	conn.WriteJSON(h)
 
 	// conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	// conn.SetPongHandler(func(string) error {
@@ -108,18 +178,11 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 
 		json.Unmarshal(b, &e)
 
-		messages = append(messages, Message{ID: id, Message: e.Message})
+		newMessage := Message{ID: uuid.NewString(), Content: e.Message, UserID: userId}
 
-		type OutgoingMessage struct {
-			Type    string `json:"type"`
-			ID      string `json:"id"`
-			Message string `json:"message"`
-		}
+		messages = append(messages, newMessage)
 
-		fmt.Println(string(b))
-		v := OutgoingMessage{Type: "message", ID: id, Message: e.Message}
-
-		//conn.WriteJSON(v)
+		v := SocketEnvelope{Event: "message", Data: newMessage}
 
 		// broadcast? maybe?
 		for _, client := range clients {
@@ -164,6 +227,23 @@ func verifyJWT(tokenString string) error {
 	}
 
 	return nil
+}
+
+func parseJWT(tokenString string) (string, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+		return jwtSecret, nil
+	})
+
+	if err != nil || !token.Valid {
+		return "", fmt.Errorf("invalid token")
+	}
+
+	if claims, ok := token.Claims.(jwt.MapClaims); ok {
+		if username, ok := claims["username"].(string); ok {
+			return username, nil
+		}
+	}
+	return "", fmt.Errorf("username claim not found")
 }
 
 func refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
@@ -337,6 +417,66 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(SuccessResponse{Message: "success"})
 }
 
+func changeNicknameHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+
+
+	authHeader := r.Header.Get("Authorization")
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+
+	err := verifyJWT(token)
+
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	email, err := parseJWT(token)
+
+	if err != nil {
+		panic(err)
+	}
+
+	type RequestData struct {
+		Nickname string `json:"nickname"`
+	}
+
+	b, _ := io.ReadAll(r.Body)
+
+	v := RequestData{}
+
+	json.Unmarshal(b, &v)
+
+	db, err := sql.Open("sqlite3", "chat.db")
+
+	if err != nil {
+		panic(err)
+	}
+
+	defer db.Close()
+
+	_, err = db.Exec(`UPDATE users SET nickname = ? WHERE email = ?`, v.Nickname, email)
+
+	if err != nil {
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "Error when updating nickname"})
+		return
+	}
+
+
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode(SuccessResponse{Message: "ok"})
+}
+
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	// preflight req (?)
@@ -431,6 +571,8 @@ func main() {
 	db.Exec(`CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, -- unique number
 		email TEXT UNIQUE NOT NULL,        -- login name
+		nickname TEXT DEFAULT ('user_' || hex(randomblob(4))),
+		color TEXT DEFAULT '#FFFFFF',
 		password_hash TEXT NOT NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
@@ -459,11 +601,12 @@ func main() {
 
 	fmt.Println("Server running on port 8080")
 
-	// http.HandleFunc("/ws", wsHandler)
+	http.HandleFunc("/ws", wsHandler)
 
 	http.HandleFunc("/login", loginHandler)
 	http.HandleFunc("/register", registerHandler)
 	http.HandleFunc("/verify-token", verifyTokenHandler)
 	http.HandleFunc("/refresh-token", refreshTokenHandler)
+	http.HandleFunc("/change-nickname", changeNicknameHandler)
 	http.ListenAndServe(`:8080`, nil)
 }
