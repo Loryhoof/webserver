@@ -39,7 +39,14 @@ type SuccessResponse struct {
 }
 
 type TokenResponse struct {
-	Token string `json:"token"`
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken"`
+}
+
+type RefreshToken struct {
+	UserID int `json:"userID"`
+	Token  string `json:"token"`
+	Expiry int64 `json:"expiry"`
 }
 
 var clients = make(map[string]Client)
@@ -131,7 +138,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 func createJWT(username string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"username": username,
-		"exp":      time.Now().Add(time.Hour * 24).Unix(),
+		"exp":      time.Now().Add(15 * time.Minute).Unix(),
 	})
 
 	tokenString, err := token.SignedString(jwtSecret)
@@ -144,7 +151,7 @@ func createJWT(username string) (string, error) {
 }
 
 func verifyJWT(tokenString string) error {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		return jwtSecret, nil
 	})
 
@@ -157,6 +164,92 @@ func verifyJWT(tokenString string) error {
 	}
 
 	return nil
+}
+
+func refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+
+	type Data struct {
+		RefreshToken string `json:"refreshToken"`
+	}
+
+	b, err := io.ReadAll(r.Body)
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	v := Data{}
+
+	json.Unmarshal(b, &v)
+
+	db, err := sql.Open("sqlite3", "chat.db")
+
+	if err != nil {
+		panic(err)
+	}
+
+	defer db.Close()
+
+	var userID int
+	var expiry int64
+
+	row := db.QueryRow(`SELECT user_id, expiry FROM refresh_tokens WHERE token = ?`, v.RefreshToken)
+	err = row.Scan(&userID, &expiry)
+
+	if err == sql.ErrNoRows {
+		fmt.Println(err)
+
+		w.WriteHeader(401)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "No refresh token found"})
+		return
+	}
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	valid := expiry > time.Now().Unix()
+
+	if valid {
+		var email string
+		row := db.QueryRow(`SELECT email FROM users WHERE id = ?`, userID)
+		err = row.Scan(&email)
+
+		if err == sql.ErrNoRows {
+			panic(err)
+		}
+
+		accessToken, err := createJWT(email)
+
+		if err != nil {
+			panic(err)
+		}
+
+		db.Exec(`DELETE FROM refresh_tokens WHERE token = ?`, v.RefreshToken)
+
+		refreshToken := RefreshToken{UserID: userID, Token: uuid.NewString(), Expiry: time.Now().Add(time.Hour * 24 * 7).Unix()}
+
+		db.Exec(`INSERT INTO refresh_tokens (user_id, token, expiry) VALUES (?, ?, ?)`, refreshToken.UserID, refreshToken.Token, refreshToken.Expiry)
+
+		w.WriteHeader(200)
+		json.NewEncoder(w).Encode(TokenResponse{AccessToken: accessToken, RefreshToken: refreshToken.Token})
+	} else {
+		w.WriteHeader(401)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "refresh token expired"})
+	}
 }
 
 func verifyTokenHandler(w http.ResponseWriter, r *http.Request) {
@@ -173,8 +266,6 @@ func verifyTokenHandler(w http.ResponseWriter, r *http.Request) {
 
 	authHeader := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(authHeader, "Bearer ")
-
-	fmt.Println(token)
 
 	err := verifyJWT(token)
 
@@ -224,6 +315,8 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
+
+	defer db.Close()
 
 	pwd, err := bcrypt.GenerateFromPassword([]byte(v.Password), bcrypt.DefaultCost)
 
@@ -279,10 +372,13 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 
+	defer db.Close()
+
+	var userID int
 	var passwordHash string
 
-	row := db.QueryRow(`SELECT password_hash FROM users WHERE email = ?`, u.Email)
-	err = row.Scan(&passwordHash)
+	row := db.QueryRow(`SELECT id, password_hash FROM users WHERE email = ?`, u.Email)
+	err = row.Scan(&userID, &passwordHash)
 
 	if err == sql.ErrNoRows {
 
@@ -299,7 +395,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tkn, err := createJWT(u.Email)
+	accTkn, err := createJWT(u.Email)
 
 	if err != nil {
 		fmt.Println("Error with jwt token creation", err)
@@ -308,8 +404,18 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expiry := time.Now().Add(time.Hour * 24 * 7).UTC().Unix() // 7 days
+	refTkn := RefreshToken{UserID: userID, Token: uuid.NewString(), Expiry: expiry}
+
+	_, err = db.Exec(`INSERT INTO refresh_tokens (user_id, token, expiry) VALUES (?, ?, ?)`, refTkn.UserID, refTkn.Token, refTkn.Expiry)
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(TokenResponse{Token: tkn})
+	json.NewEncoder(w).Encode(TokenResponse{AccessToken: accTkn, RefreshToken: refTkn.Token})
 }
 
 func main() {
@@ -322,15 +428,22 @@ func main() {
 
 	defer db.Close()
 
-	sqlStmt := `CREATE TABLE IF NOT EXISTS users (
+	db.Exec(`CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, -- unique number
 		email TEXT UNIQUE NOT NULL,        -- login name
 		password_hash TEXT NOT NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
-	`
+	`)
 
-	db.Exec(sqlStmt)
+	db.Exec(`CREATE TABLE IF NOT EXISTS refresh_tokens (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INT NOT NULL,
+		token TEXT NOT NULL UNIQUE,
+		expiry INTEGER NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);
+	`)
 
 	rows, _ := db.Query("SELECT * FROM users")
 
@@ -351,5 +464,6 @@ func main() {
 	http.HandleFunc("/login", loginHandler)
 	http.HandleFunc("/register", registerHandler)
 	http.HandleFunc("/verify-token", verifyTokenHandler)
+	http.HandleFunc("/refresh-token", refreshTokenHandler)
 	http.ListenAndServe(`:8080`, nil)
 }
