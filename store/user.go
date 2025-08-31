@@ -38,3 +38,11 @@ func GetUserEmailById(id int) (string, error) {
 
 	return email, err
 }
+
+func UpdateUserNickname(nickname string, email string) error {
+	database := db.GetDB()
+
+	_, err := database.Exec(`UPDATE users SET nickname = ? WHERE email = ?`, nickname, email)
+
+	return err
+}

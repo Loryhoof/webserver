@@ -1,10 +1,7 @@
 package handlers
 
 import (
-	"database/sql"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -20,32 +17,22 @@ func RefreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 		RefreshToken string `json:"refreshToken"`
 	}
 
-	b, err := io.ReadAll(r.Body)
-
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
 	v := Data{}
 
-	json.Unmarshal(b, &v)
+	err := json.NewDecoder(r.Body).Decode(&v)
+
+	if err != nil {
+		types.WriteError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
 
 	userID, expiry, err := store.GetRefreshTokenUserAndExpiry(v.RefreshToken)
 	
-
-	if err == sql.ErrNoRows {
-		fmt.Println(err)
-
-		w.WriteHeader(401)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "No refresh token found"})
-		return
-	}
-
 	if err != nil {
-		fmt.Println(err)
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
+	
 
 	valid := expiry > time.Now().Unix()
 
@@ -53,33 +40,34 @@ func RefreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 		email, err := store.GetUserEmailById(userID)
 
 		if err != nil {
-			panic(err)
+			types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+			return
 		}
 		
 		accessToken, err := auth.CreateJWT(email)
 
 		if err != nil {
-			panic(err)
+			types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+			return
 		}
 
 		err = store.DeleteRefreshToken(v.RefreshToken)
 
 		if err != nil {
-			panic(err)
+			types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+			return
 		}
 
 		refreshToken := models.RefreshToken{UserID: userID, Token: uuid.NewString(), Expiry: time.Now().Add(time.Hour * 24 * 7).Unix()}
 		err = store.AddRefreshToken(refreshToken)
 
 		if err != nil {
-			panic(err)
+			types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+			return
 		}
 
-
-		w.WriteHeader(200)
-		json.NewEncoder(w).Encode(types.TokenResponse{AccessToken: accessToken, RefreshToken: refreshToken.Token})
+		types.WriteJSON(w, http.StatusOK, types.TokenResponse{AccessToken: accessToken, RefreshToken: refreshToken.Token})
 	} else {
-		w.WriteHeader(401)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "refresh token expired"})
+		types.WriteError(w, http.StatusUnauthorized, "Refresh Token Expired")
 	}
 }

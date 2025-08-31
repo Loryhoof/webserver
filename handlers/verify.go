@@ -1,8 +1,7 @@
 package handlers
 
 import (
-	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -18,13 +17,10 @@ func VerifyTokenHandler(w http.ResponseWriter, r *http.Request) {
 	err := auth.VerifyJWT(token)
 
 	if err != nil {
-		fmt.Println(err)
-
-		w.WriteHeader(401)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Unauthorized"})
+		log.Println("VerifyTokenHandler:", err)
+		types.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
-	w.WriteHeader(200)
-	json.NewEncoder(w).Encode(types.SuccessResponse{Message: "valid jwt"})
+	types.WriteSuccess(w, "success")
 }

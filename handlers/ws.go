@@ -27,14 +27,14 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 	tkn := r.URL.Query().Get("token")
 
 	if tkn == "" {
-		fmt.Println("no token")
+		types.WriteError(w, http.StatusBadRequest, "No token")
 		return
 	}
 
 	err := auth.VerifyJWT(tkn)
 
 	if err != nil {
-		fmt.Printf("Token invalid for ws handshake")
+		types.WriteError(w, http.StatusUnauthorized, "Invalid token")
 		return
 	}
 
@@ -43,7 +43,8 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 	email, err := auth.ParseJWT(tkn)
 
 	if err != nil {
-		panic(err)
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+		return
 	}
 	row := database.QueryRow(`SELECT id, nickname, color FROM users WHERE email = ?`, email)
 
@@ -54,7 +55,8 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 	err = row.Scan(&userId, &nickname, &color)
 
 	if err != nil {
-		panic(err)
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+		return
 	}
 
 	fmt.Println(nickname, color)
@@ -63,6 +65,7 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 
 	if err != nil {
 		fmt.Println(err)
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
 
@@ -106,7 +109,8 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 		_, b, err := conn.ReadMessage()
 
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("Error on reading message")
+			types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
 			return
 		}
 

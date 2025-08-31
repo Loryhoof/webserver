@@ -2,12 +2,12 @@ package handlers
 
 import (
 	"encoding/json"
-	"io"
+	"log"
 	"net/http"
 	"strings"
 
 	"github.com/Loryhoof/webserver/auth"
-	"github.com/Loryhoof/webserver/db"
+	"github.com/Loryhoof/webserver/store"
 	"github.com/Loryhoof/webserver/types"
 )
 
@@ -19,37 +19,50 @@ func ChangeNicknameHandler(w http.ResponseWriter, r *http.Request) {
 	err := auth.VerifyJWT(token)
 
 	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		types.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	email, err := auth.ParseJWT(token)
 
 	if err != nil {
-		panic(err)
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+		return
 	}
 
 	type RequestData struct {
 		Nickname string `json:"nickname"`
 	}
 
-	b, _ := io.ReadAll(r.Body)
-
 	v := RequestData{}
 
-	json.Unmarshal(b, &v)
-
-	database := db.GetDB()
-
-	_, err = database.Exec(`UPDATE users SET nickname = ? WHERE email = ?`, v.Nickname, email)
+	err = json.NewDecoder(r.Body).Decode(&v)
 
 	if err != nil {
-		w.WriteHeader(500)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Error when updating nickname"})
+		types.WriteError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
+	// got nickname
 
-	w.WriteHeader(200)
-	json.NewEncoder(w).Encode(types.SuccessResponse{Message: "ok"})
+	//validate nickname
+	if len(strings.TrimSpace(v.Nickname)) == 0 {
+		types.WriteError(w, http.StatusBadRequest, "Nickname cannot be empty")
+		return
+	}
+
+	if len(v.Nickname) > 32 {
+		types.WriteError(w, http.StatusBadRequest, "Nickname too long")
+		return
+	}
+
+	err = store.UpdateUserNickname(v.Nickname, email)
+
+	if err != nil {
+		log.Println("Error when store.UpdateUserNickname", err.Error())
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	types.WriteSuccess(w, "success")
 }
