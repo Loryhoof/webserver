@@ -1,4 +1,4 @@
-module go_tutorial
+module github.com/Loryhoof/webserver
 
 go 1.25.0
 
