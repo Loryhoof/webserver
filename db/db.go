@@ -54,4 +54,16 @@ func Init(path string) {
 		panic(err)
 	}
 
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS messages (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INT NOT NULL,
+		content TEXT NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);
+	`)
+
+	if err != nil {
+		panic(err)
+	}
+
 }

@@ -1,16 +1,14 @@
 package handlers
 
 import (
-	"database/sql"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Loryhoof/webserver/auth"
-	"github.com/Loryhoof/webserver/db"
 	"github.com/Loryhoof/webserver/models"
+	"github.com/Loryhoof/webserver/store"
 	"github.com/Loryhoof/webserver/types"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -22,97 +20,89 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 
-	data, err := io.ReadAll(r.Body)
-
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
 	v := Data{}
 
-	json.Unmarshal(data, &v)
+	err := json.NewDecoder(r.Body).Decode(&v)
 
-	database := db.GetDB()
+	if err != nil {
+		types.WriteError(w, http.StatusBadRequest, "Invalid form body")
+		return
+	}
 
 	pwd, err := bcrypt.GenerateFromPassword([]byte(v.Password), bcrypt.DefaultCost)
 
 	if err != nil {
-		panic(err)
-	}
-
-	_, err = database.Exec(`INSERT INTO users (email, password_hash) VALUES (?, ?)`, v.Email, string(pwd))
-
-	if err != nil {
-		fmt.Println(err)
-		w.WriteHeader(500)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Internal error when registering"})
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
 
-	w.WriteHeader(200)
-	json.NewEncoder(w).Encode(types.SuccessResponse{Message: "success"})
+	// normalize email
+	v.Email = strings.TrimSpace(strings.ToLower(v.Email))
+
+	err = store.CreateUser(v.Email, string(pwd))
+
+	if err != nil {
+		if(strings.Contains(err.Error(), "UNIQUE constraint failed")) {
+			types.WriteError(w, http.StatusConflict, "User already exists")
+			return
+		}
+
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	types.WriteSuccess(w, "success")
 }
 
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
-	
+
 	type Data struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 
-	data, err := io.ReadAll(r.Body)
+	v := Data{}
+
+	err := json.NewDecoder(r.Body).Decode(&v)
 
 	if err != nil {
-		fmt.Println(err)
+		types.WriteError(w, http.StatusBadRequest, "Invalid form body")
 		return
 	}
 
-	u := Data{}
-	json.Unmarshal(data, &u)
+	// normalize email
+	v.Email = strings.TrimSpace(strings.ToLower(v.Email))
 
-	database := db.GetDB()
+	userID, passwordHash, err := store.GetUserCredentialsByEmail(v.Email)
 
-	var userID int
-	var passwordHash string
-
-	row := database.QueryRow(`SELECT id, password_hash FROM users WHERE email = ?`, u.Email)
-	err = row.Scan(&userID, &passwordHash)
-
-	if err == sql.ErrNoRows {
-
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Invalid email or password"})
+	if err != nil {
+		types.WriteError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
-	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(u.Password))
+	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(v.Password))
 
 	if err != nil {
-		w.WriteHeader(401)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Invalid password"})
+		types.WriteError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
-	accTkn, err := auth.CreateJWT(u.Email)
+	accTkn, err := auth.CreateJWT(v.Email)
 
 	if err != nil {
-		fmt.Println("Error with jwt token creation", err)
-		w.WriteHeader(500)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Something went wrong"})
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
 
 	expiry := time.Now().Add(time.Hour * 24 * 7).UTC().Unix() // 7 days
 	refTkn := models.RefreshToken{UserID: userID, Token: uuid.NewString(), Expiry: expiry}
 
-	_, err = database.Exec(`INSERT INTO refresh_tokens (user_id, token, expiry) VALUES (?, ?, ?)`, refTkn.UserID, refTkn.Token, refTkn.Expiry)
+	err = store.AddRefreshToken(refTkn)
 
 	if err != nil {
-		fmt.Println(err)
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(types.TokenResponse{AccessToken: accTkn, RefreshToken: refTkn.Token})
+	types.WriteJSON(w, http.StatusOK, types.TokenResponse{AccessToken: accTkn, RefreshToken: refTkn.Token})
 }

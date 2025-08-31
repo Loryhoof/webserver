@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/Loryhoof/webserver/auth"
-	"github.com/Loryhoof/webserver/db"
 	"github.com/Loryhoof/webserver/models"
+	"github.com/Loryhoof/webserver/store"
 	"github.com/Loryhoof/webserver/types"
 	"github.com/google/uuid"
 )
@@ -31,13 +31,8 @@ func RefreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 
 	json.Unmarshal(b, &v)
 
-	database := db.GetDB()
-
-	var userID int
-	var expiry int64
-
-	row := database.QueryRow(`SELECT user_id, expiry FROM refresh_tokens WHERE token = ?`, v.RefreshToken)
-	err = row.Scan(&userID, &expiry)
+	userID, expiry, err := store.GetRefreshTokenUserAndExpiry(v.RefreshToken)
+	
 
 	if err == sql.ErrNoRows {
 		fmt.Println(err)
@@ -55,25 +50,31 @@ func RefreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 	valid := expiry > time.Now().Unix()
 
 	if valid {
-		var email string
-		row := database.QueryRow(`SELECT email FROM users WHERE id = ?`, userID)
-		err = row.Scan(&email)
+		email, err := store.GetUserEmailById(userID)
 
-		if err == sql.ErrNoRows {
+		if err != nil {
 			panic(err)
 		}
-
+		
 		accessToken, err := auth.CreateJWT(email)
 
 		if err != nil {
 			panic(err)
 		}
 
-		database.Exec(`DELETE FROM refresh_tokens WHERE token = ?`, v.RefreshToken)
+		err = store.DeleteRefreshToken(v.RefreshToken)
+
+		if err != nil {
+			panic(err)
+		}
 
 		refreshToken := models.RefreshToken{UserID: userID, Token: uuid.NewString(), Expiry: time.Now().Add(time.Hour * 24 * 7).Unix()}
+		err = store.AddRefreshToken(refreshToken)
 
-		database.Exec(`INSERT INTO refresh_tokens (user_id, token, expiry) VALUES (?, ?, ?)`, refreshToken.UserID, refreshToken.Token, refreshToken.Expiry)
+		if err != nil {
+			panic(err)
+		}
+
 
 		w.WriteHeader(200)
 		json.NewEncoder(w).Encode(types.TokenResponse{AccessToken: accessToken, RefreshToken: refreshToken.Token})

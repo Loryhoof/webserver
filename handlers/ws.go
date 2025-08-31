@@ -66,6 +66,8 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 		return
 	}
 
+	// past this point we're connected
+
 	client := models.Client{ID: userId, Connection: conn, Nickname: nickname, Color: color}
 
 	clientsMu.Lock()
