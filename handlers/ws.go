@@ -24,17 +24,6 @@ var upgrader = websocket.Upgrader{
 
 func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string]*models.Client, messages *[]models.Message, clientsMu *sync.Mutex, messagesMu *sync.Mutex) {
 
-	if r.Method == http.MethodOptions {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Content-Type", "application/json")
-
 	tkn := r.URL.Query().Get("token")
 
 	if tkn == "" {

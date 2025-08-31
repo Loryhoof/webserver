@@ -9,8 +9,13 @@ import (
 
 	"github.com/Loryhoof/webserver/db"
 	"github.com/Loryhoof/webserver/handlers"
+	"github.com/Loryhoof/webserver/middleware"
 	"github.com/Loryhoof/webserver/models"
 )
+
+func withCors(h http.HandlerFunc) http.Handler {
+	return middleware.Cors(h)
+}
 
 func main() {
 
@@ -25,14 +30,17 @@ func main() {
 
 	fmt.Println("Server running on port 8080")
 
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handlers.WebsocketHandler(w, r, clients, &messages, &clientsMu, &messagesMu)
-	})
+	mux := http.NewServeMux()
 
-	http.HandleFunc("/login", handlers.LoginHandler)
-	http.HandleFunc("/register", handlers.RegisterHandler)
-	http.HandleFunc("/verify-token", handlers.VerifyTokenHandler)
-	http.HandleFunc("/refresh-token", handlers.RefreshTokenHandler)
-	http.HandleFunc("/change-nickname", handlers.ChangeNicknameHandler)
-	http.ListenAndServe(`:8080`, nil)
+	mux.Handle("/ws", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlers.WebsocketHandler(w, r, clients, &messages, &clientsMu, &messagesMu)
+	}))
+
+	mux.Handle("/verify-token", http.HandlerFunc(handlers.VerifyTokenHandler))
+	mux.Handle("/login", http.HandlerFunc(handlers.LoginHandler))
+	mux.Handle("/register", http.HandlerFunc(handlers.RegisterHandler))
+	mux.Handle("/refresh-token", http.HandlerFunc(handlers.RefreshTokenHandler))
+	mux.Handle("/change-nickname", http.HandlerFunc(handlers.ChangeNicknameHandler))
+
+	http.ListenAndServe(`:8080`, middleware.Cors(mux))
 }
