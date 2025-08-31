@@ -23,12 +23,12 @@ func DeleteRefreshToken(tokenString string) error {
 	return err
 }
 
-func GetRefreshTokenUserAndExpiry(tokenString string) (int, int64, error) {
+func GetRefreshTokenUserAndExpiry(tokenString string) (string, int64, error) {
 	database := db.GetDB()
 
 	row := database.QueryRow(`SELECT user_id, expiry FROM refresh_tokens WHERE token = ?`, tokenString)
 
-	var userID int
+	var userID string
 	var expiry int64
 
 	err := row.Scan(&userID, &expiry)

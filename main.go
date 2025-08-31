@@ -11,6 +11,7 @@ import (
 	"github.com/Loryhoof/webserver/handlers"
 	"github.com/Loryhoof/webserver/middleware"
 	"github.com/Loryhoof/webserver/models"
+	"github.com/Loryhoof/webserver/store"
 )
 
 func main() {
@@ -19,7 +20,12 @@ func main() {
 	defer db.Close()
 
 	clients := make(map[string]*models.Client)
-	messages := []models.Message{}
+	messages, err := store.GetAllMessages()
+
+	if err != nil {
+		fmt.Print(err)
+		return
+	}
 
 	var clientsMu sync.Mutex
 	var messagesMu sync.Mutex

@@ -3,12 +3,14 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 
 	"github.com/Loryhoof/webserver/auth"
 	"github.com/Loryhoof/webserver/db"
 	"github.com/Loryhoof/webserver/models"
+	"github.com/Loryhoof/webserver/store"
 	"github.com/Loryhoof/webserver/types"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -124,6 +126,14 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 		json.Unmarshal(b, &e)
 
 		newMessage := models.Message{ID: uuid.NewString(), Content: e.Message, UserID: userId}
+
+		err = store.CreateMessage(newMessage.UserID, newMessage.Content)
+
+		if err != nil {
+			log.Println("Could not create message in DB", err)
+			types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+			return
+		}
 
 		messagesMu.Lock()
 		*messages = append(*messages, newMessage)

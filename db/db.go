@@ -28,8 +28,8 @@ func Init(path string) {
 	}
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT, -- unique number
-		email TEXT UNIQUE NOT NULL,        -- login name
+		id TEXT PRIMARY KEY,
+		email TEXT UNIQUE NOT NULL,
 		nickname TEXT DEFAULT ('user_' || hex(randomblob(4))),
 		color TEXT DEFAULT '#FFFFFF',
 		password_hash TEXT NOT NULL,
@@ -43,7 +43,7 @@ func Init(path string) {
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS refresh_tokens (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		user_id INT NOT NULL,
+		user_id TEXT NOT NULL,
 		token TEXT NOT NULL UNIQUE,
 		expiry INTEGER NOT NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -55,7 +55,7 @@ func Init(path string) {
 	}
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS messages (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id TEXT PRIMARY KEY,
 		user_id INT NOT NULL,
 		content TEXT NOT NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
