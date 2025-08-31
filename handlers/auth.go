@@ -106,3 +106,29 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	types.WriteJSON(w, http.StatusOK, types.TokenResponse{AccessToken: accTkn, RefreshToken: refTkn.Token})
 }
+
+func LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	b := r.Header.Get("Authorization")
+	tkn := strings.TrimPrefix(b, "Bearer ")
+
+	type Req struct {
+		RefreshToken string `json:"refreshToken"`
+	}
+
+	v := Req{}
+
+	json.NewDecoder(r.Body).Decode(&v)
+
+	if len(tkn) == 0 {
+		types.WriteError(w, http.StatusBadRequest, "No token provided")
+		return
+	}
+	err := store.DeleteRefreshToken(v.RefreshToken)
+
+	if err != nil {
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong when deleting Refresh Token")
+		return
+	}
+
+	types.WriteSuccess(w, "success")
+}

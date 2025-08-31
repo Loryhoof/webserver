@@ -66,3 +66,38 @@ func ChangeNicknameHandler(w http.ResponseWriter, r *http.Request) {
 
 	types.WriteSuccess(w, "success")
 }
+
+func GetUserInfo(w http.ResponseWriter, r *http.Request) {
+
+	b := r.Header.Get("Authorization")
+
+	tkn := strings.TrimPrefix(b, "Bearer ")
+
+	if len(tkn) == 0 {
+		types.WriteError(w, http.StatusBadRequest, "Missing token")
+		return
+	}
+
+	err := auth.VerifyJWT(tkn)
+
+	if err != nil {
+		types.WriteError(w, http.StatusUnauthorized, "Invalid token")
+		return
+	}
+
+	email, err := auth.ParseJWT(tkn)
+
+	if err != nil {
+		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	user, err := store.GetUserByEmail(email)
+
+	if err != nil {
+		types.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	types.WriteJSON(w, http.StatusOK, user)
+}

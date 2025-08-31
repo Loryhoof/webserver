@@ -19,13 +19,9 @@ func main() {
 	db.Init("./chat.db")
 	defer db.Close()
 
-	clients := make(map[string]*models.Client)
-	messages, err := store.GetAllMessages()
-
-	if err != nil {
-		fmt.Print(err)
-		return
-	}
+	connectedClients := make(map[string]*models.Client)
+	messages, _ := store.GetAllMessages()
+	serverUsers, _ := store.GetAllUsers()
 
 	var clientsMu sync.Mutex
 	var messagesMu sync.Mutex
@@ -35,14 +31,16 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.Handle("/ws", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handlers.WebsocketHandler(w, r, clients, &messages, &clientsMu, &messagesMu)
+		handlers.WebsocketHandler(w, r, connectedClients, serverUsers, &messages, &clientsMu, &messagesMu)
 	}))
 
 	mux.Handle("/verify-token", http.HandlerFunc(handlers.VerifyTokenHandler))
 	mux.Handle("/login", http.HandlerFunc(handlers.LoginHandler))
+	mux.Handle("/logout", http.HandlerFunc(handlers.LogoutHandler))
 	mux.Handle("/register", http.HandlerFunc(handlers.RegisterHandler))
 	mux.Handle("/refresh-token", http.HandlerFunc(handlers.RefreshTokenHandler))
 	mux.Handle("/change-nickname", http.HandlerFunc(handlers.ChangeNicknameHandler))
+	mux.Handle("/user-info", http.HandlerFunc(handlers.GetUserInfo))
 
 	http.ListenAndServe(`:8080`, middleware.Cors(mux))
 }

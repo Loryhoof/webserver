@@ -24,7 +24,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string]*models.Client, messages *[]models.Message, clientsMu *sync.Mutex, messagesMu *sync.Mutex) {
+func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string]*models.Client, serverUsers []models.User, messages *[]models.Message, clientsMu *sync.Mutex, messagesMu *sync.Mutex) {
 
 	tkn := r.URL.Query().Get("token")
 
@@ -94,6 +94,7 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 	type HistoryEvent struct {
 		Users []*models.Client `json:"users"`
 		Messages []models.Message `json:"messages"`
+		ServerUsers []models.User `json:"serverUsers"`
 	}
 	
 	clientSlice := make([]*models.Client, 0, len(clients))

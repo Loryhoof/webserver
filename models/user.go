@@ -8,3 +8,9 @@ type Client struct {
 	Color      string `json:"color"`
 	Connection *websocket.Conn `json:"-"`
 }
+
+type User struct {
+	ID         string `json:"id"`
+	Nickname   string `json:"nickname"`
+	Color      string `json:"color"`
+}
