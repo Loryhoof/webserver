@@ -13,10 +13,6 @@ import (
 	"github.com/Loryhoof/webserver/models"
 )
 
-func withCors(h http.HandlerFunc) http.Handler {
-	return middleware.Cors(h)
-}
-
 func main() {
 
 	db.Init("./chat.db")
