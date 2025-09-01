@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
+	"time"
 
 	"github.com/Loryhoof/webserver/auth"
 	"github.com/Loryhoof/webserver/db"
+	"github.com/Loryhoof/webserver/hubs"
 	"github.com/Loryhoof/webserver/models"
 	"github.com/Loryhoof/webserver/store"
 	"github.com/Loryhoof/webserver/types"
@@ -24,7 +25,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string]*models.Client, serverUsers []models.User, messages *[]models.Message, clientsMu *sync.Mutex, messagesMu *sync.Mutex) {
+func WebsocketHandler(w http.ResponseWriter, r *http.Request, hub *hubs.Hub) {
 
 	tkn := r.URL.Query().Get("token")
 
@@ -42,19 +43,18 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 
 	database := db.GetDB()
 
-	email, err := auth.ParseJWT(tkn)
+	userID, err := auth.ParseJWT(tkn)
 
 	if err != nil {
 		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
-	row := database.QueryRow(`SELECT id, nickname, color FROM users WHERE email = ?`, email)
+	row := database.QueryRow(`SELECT nickname, color FROM users WHERE id = ?`, userID)
 
-	var userId string
 	var nickname string
 	var color string
 
-	err = row.Scan(&userId, &nickname, &color)
+	err = row.Scan(&nickname, &color)
 
 	if err != nil {
 		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
@@ -73,36 +73,30 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 
 	// past this point we're connected
 
-	client := models.Client{ID: userId, Connection: conn, Nickname: nickname, Color: color}
+	client := models.Client{ID: userID, Connection: conn, Nickname: nickname, Color: color, Send: make(chan types.SocketEnvelope, 256)}
 
-	clientsMu.Lock()
-	clients[userId] = &client
-	clientsMu.Unlock()
+	//clientsMu.Lock()
+	hub.Register(&client)
+	// clients[userId] = &client
+	//clientsMu.Unlock()
 	
 	fmt.Printf("Client connected: %v", client.ID)
 
 	conn.SetCloseHandler(func(code int, text string) error {
-		fmt.Println("\nClient sent close frame:", userId, "Code:", code, "Text:", text)
-		
-		clientsMu.Lock()
-		delete(clients, userId)
-		clientsMu.Unlock()
-
+		fmt.Println("\nClient sent close frame:", userID, "Code:", code, "Text:", text)
+		hub.Unregister(&client)
 		return nil
 	})
 
 	type HistoryEvent struct {
-		Users []*models.Client `json:"users"`
 		Messages []models.Message `json:"messages"`
-		ServerUsers []models.User `json:"serverUsers"`
-	}
-	
-	clientSlice := make([]*models.Client, 0, len(clients))
-	for _, c := range clients {
-		clientSlice = append(clientSlice, c)
+		Users []models.User `json:"serverUsers"`
 	}
 
-	h := types.SocketEnvelope{Event: "history", Data: HistoryEvent{Messages: *messages, Users: clientSlice}}
+	messages, _ := store.GetAllMessages()
+	users, _ := store.GetAllUsers()
+
+	h := types.SocketEnvelope{Event: "history", Data: HistoryEvent{Messages: messages, Users: users}}
 
 	conn.WriteJSON(h)
 
@@ -126,7 +120,7 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 
 		json.Unmarshal(b, &e)
 
-		newMessage := models.Message{ID: uuid.NewString(), Content: e.Message, UserID: userId}
+		newMessage := models.Message{ID: uuid.NewString(), Content: e.Message, UserID: userID, CreatedAt: time.Now().Local().String()}
 
 		err = store.CreateMessage(newMessage.UserID, newMessage.Content)
 
@@ -136,26 +130,30 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request, clients map[string
 			return
 		}
 
-		messagesMu.Lock()
-		*messages = append(*messages, newMessage)
-		messagesMu.Unlock()
+		hub.AddMessage(newMessage)
 
-		v := types.SocketEnvelope{Event: "message", Data: newMessage}
+		//messagesMu.Lock()
+	//	*messages = append(*messages, newMessage)
+
+		//hub.Broadcast(newMessage)
+//		messagesMu.Unlock()
+
+		//v := types.SocketEnvelope{Event: "message", Data: newMessage}
 
 		// broadcast? maybe?
-		clientsMu.Lock()
-		for _, client := range clients {
-			err := client.Connection.WriteJSON(v)
+		//clientsMu.Lock()
+		// for _, client := range clientSlice {
+		// 	err := client.Connection.WriteJSON(v)
 
-			if err != nil {
-				fmt.Println("write error, removing client:", client.ID, err)
-				client.Connection.Close()
+		// 	if err != nil {
+		// 		fmt.Println("write error, removing client:", client.ID, err)
+		// 		client.Connection.Close()
 
-				clientsMu.Lock()
-				delete(clients, client.ID)
-				clientsMu.Unlock()
-			}
-		}
-		clientsMu.Unlock()
+		// 		//clientsMu.Lock()
+		// 		//delete(clients, client.ID)
+		// 		//clientsMu.Unlock()
+		// 	}
+		// }
+		//clientsMu.Unlock()
 	}
 }

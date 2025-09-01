@@ -87,7 +87,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accTkn, err := auth.CreateJWT(v.Email)
+	accTkn, err := auth.CreateJWT(userID)
 
 	if err != nil {
 		types.WriteError(w, http.StatusInternalServerError, "Something went wrong")

@@ -21,7 +21,7 @@ func GetAllMessages() ([]models.Message, error) {
 
 	msgArray := []models.Message{}
 
-	rows, err := database.Query(`SELECT id, content, user_id FROM messages ORDER BY created_at ASC`)
+	rows, err := database.Query(`SELECT id, content, user_id, created_at FROM messages ORDER BY created_at ASC`)
 
 	if err != nil {
 		log.Println("GetAllMessage Error: ", err)
@@ -34,7 +34,7 @@ func GetAllMessages() ([]models.Message, error) {
 
 		msg := models.Message{}
 
-		err := rows.Scan(&msg.ID, &msg.Content, &msg.UserID)
+		err := rows.Scan(&msg.ID, &msg.Content, &msg.UserID, &msg.CreatedAt)
 
 		if err != nil {
 			log.Println("GetAllMessage Error: ", err)

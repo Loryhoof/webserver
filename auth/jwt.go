@@ -10,9 +10,9 @@ import (
 var jwtSecret = []byte("1e2e894f1b997c8a92e577a7e9f6a30e805cd53b")
 
 
-func CreateJWT(username string) (string, error) {
+func CreateJWT(userID string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": username,
+		"userId": userID,
 		"exp":      time.Now().Add(15 * time.Minute).Unix(),
 	})
 
@@ -51,9 +51,9 @@ func ParseJWT(tokenString string) (string, error) {
 	}
 
 	if claims, ok := token.Claims.(jwt.MapClaims); ok {
-		if username, ok := claims["username"].(string); ok {
-			return username, nil
+		if userID, ok := claims["userId"].(string); ok {
+			return userID, nil
 		}
 	}
-	return "", fmt.Errorf("username claim not found")
+	return "", fmt.Errorf("userID claim not found")
 }

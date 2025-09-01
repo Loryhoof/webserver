@@ -84,25 +84,26 @@ func GetUserEmailById(id string) (string, error) {
 	return email, err
 }
 
-func UpdateUserNickname(nickname string, email string) error {
+func UpdateUserNickname(nickname string, userID string) error {
 	database := db.GetDB()
 
-	_, err := database.Exec(`UPDATE users SET nickname = ? WHERE email = ?`, nickname, email)
+	_, err := database.Exec(`UPDATE users SET nickname = ? WHERE id = ?`, nickname, userID)
 
 	return err
 }
 
-func GetUserByEmail(email string) (User, error) {
+func UpdaterUserColor(color string, userID string) error {
 	database := db.GetDB()
 
-	// 	id TEXT PRIMARY KEY,
-	// 	email TEXT UNIQUE NOT NULL,
-	// 	nickname TEXT DEFAULT ('user_' || hex(randomblob(4))),
-	// 	color TEXT DEFAULT '#FFFFFF',
-	// 	password_hash TEXT NOT NULL,
-	// 	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	
-	row := database.QueryRow(`SELECT id, email, nickname, color, created_at FROM users WHERE email = ?`, email)
+	_, err := database.Exec(`UPDATE users SET color = ? WHERE id = ?`, color, userID)
+
+	return err
+}
+
+func GetUser(userID string) (User, error) {
+	database := db.GetDB()
+
+	row := database.QueryRow(`SELECT id, email, nickname, color, created_at FROM users WHERE id = ?`, userID)
 
 	u := User{}
 

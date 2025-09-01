@@ -37,14 +37,14 @@ func RefreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 	valid := expiry > time.Now().Unix()
 
 	if valid {
-		email, err := store.GetUserEmailById(userID)
+		// email, err := store.GetUserEmailById(userID)
 
-		if err != nil {
-			types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
-			return
-		}
+		// if err != nil {
+		// 	types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+		// 	return
+		// }
 		
-		accessToken, err := auth.CreateJWT(email)
+		accessToken, err := auth.CreateJWT(userID)
 
 		if err != nil {
 			types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
