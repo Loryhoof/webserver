@@ -56,6 +56,15 @@ func UpdateUserHandler(w http.ResponseWriter, r *http.Request, hub *hubs.Hub) {
 		}
 	}
 
+	if (v.Field == "nickname") {
+		err := store.UpdateUserNickname(v.Value, userID)
+
+		if err != nil {
+			types.WriteError(w, http.StatusInternalServerError, "Something went wrong")
+			return
+		}
+	}
+
 	user, err := store.GetUser(userID)
 
 	if err != nil {
