@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/Loryhoof/webserver/db"
 	"github.com/Loryhoof/webserver/handlers"
@@ -14,12 +15,11 @@ import (
 )
 
 func main() {
+
+	mode := os.Getenv("MODE")
+
 	db.Init("./chat.db")
 	defer db.Close()
-
-	// connectedClients := make(map[string]*models.Client)
-	// messages, _ := store.GetAllMessages()
-	// serverUsers, _ := store.GetAllUsers()
 
 	hub, err := hubs.NewHub()
 
@@ -29,8 +29,6 @@ func main() {
 	}
 
 	hub.Run()
-
-	fmt.Println("Server running on port 8080")
 
 	mux := http.NewServeMux()
 
@@ -53,6 +51,15 @@ func main() {
 		handlers.UpdateUserHandler(w, r, hub)
 	}))
 
+	if mode == "PROD" {
+		log.Fatal(http.ListenAndServeTLS(
+			":443",
+			"/etc/letsencrypt/live/yourdomain/fullchain.pem",
+			"/etc/letsencrypt/live/yourdomain/privkey.pem",
+			middleware.Cors(mux),
+		))
+	}
 
-	http.ListenAndServe(`:8080`, middleware.Cors(mux))
+	fmt.Println("DEV Server running on port 8080")
+	log.Fatal(http.ListenAndServe(`:8080`, middleware.Cors(mux)))
 }
