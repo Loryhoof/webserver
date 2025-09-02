@@ -54,8 +54,8 @@ func main() {
 	if mode == "PROD" {
 		log.Fatal(http.ListenAndServeTLS(
 			":443",
-			"/etc/letsencrypt/live/yourdomain/fullchain.pem",
-			"/etc/letsencrypt/live/yourdomain/privkey.pem",
+			"/etc/letsencrypt/live/chatapp.kevinklatt.de/fullchain.pem",
+			"/etc/letsencrypt/live/chatapp.kevinklatt.de/privkey.pem",
 			middleware.Cors(mux),
 		))
 	}
